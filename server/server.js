@@ -1,42 +1,31 @@
-const express = require('express');
-const fs = require('fs');
-const ip = require('ip');
-const path = require('path');
+import express from 'express';
+import { connectToDatabase } from './mongodb.js'; // Adjust the path if necessary
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(express.json());
 
-const dataDir = path.join(__dirname, 'data');
+app.post('/upload', async (req, res) => {
+  const { objects } = req.body;
+  const userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-// Ensure the 'data' directory exists
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir);
-}
+  if (!objects) {
+    return res.status(400).send('No objects provided');
+  }
 
-// Endpoint to receive object data from the extension
-app.post('/upload', (req, res) => {
-  const objects = req.body.objects;
-  const userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || ip.address();
+  const db = await connectToDatabase();
+  const collection = db.collection("objects");
 
-  // Format the file name based on the user's IP
-  const fileName = `${userIp.replace(/[:.]/g, '_')}.txt`;
-  const filePath = path.join(dataDir, fileName);
-
-  // Format the object data as a comma-separated string
-  const formattedObjects = objects.map(obj => obj.join(', ')).join(', ');
-
-  // Append the objects to the IP-specific file
-  fs.appendFile(filePath, `${formattedObjects}\n`, (err) => {
-    if (err) {
-      console.error('Error saving objects:', err);
-      return res.status(500).send('Failed to save objects');
-    }
-    console.log(`Objects saved for IP ${userIp}: ${formattedObjects}`);
-    res.send('Objects received and saved');
-  });
+  try {
+    await collection.insertOne({ ip: userIp, objects, timestamp: new Date() });
+    res.status(200).send('Data saved successfully');
+  } catch (error) {
+    console.error('Error saving data:', error);
+    res.status(500).send('Error saving data');
+  }
 });
 
-// Start the server on port 3000
-app.listen(3000, () => {
-  console.log('Server running on http://localhost:3000');
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
