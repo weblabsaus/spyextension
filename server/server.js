@@ -1,31 +1,49 @@
-import express from 'express';
-import { connectToDatabase } from './mongodb.js'; // Adjust the path if necessary
+// server.js
+const express = require('express');
+const http = require('http');
+const socketIO = require('socket.io');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const server = http.createServer(app);
+const io = socketIO(server);
 
-app.use(express.json());
+let currentCommand = '';  // Store the current command
 
-app.post('/upload', async (req, res) => {
-  const { objects } = req.body;
-  const userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+// Serve static files for the web interface
+app.use(express.static(path.join(__dirname, 'public')));
 
-  if (!objects) {
-    return res.status(400).send('No objects provided');
-  }
-
-  const db = await connectToDatabase();
-  const collection = db.collection("objects");
-
-  try {
-    await collection.insertOne({ ip: userIp, objects, timestamp: new Date() });
-    res.status(200).send('Data saved successfully');
-  } catch (error) {
-    console.error('Error saving data:', error);
-    res.status(500).send('Error saving data');
-  }
+// API endpoint to get the current command
+app.get('/api/command', (req, res) => {
+  res.json({ command: currentCommand });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// API to receive the ping results
+app.post('/api/ping-results', express.json(), (req, res) => {
+  const { ip, result } = req.body;
+  const log = `IP: ${ip} Result: ${result}\n`;
+  fs.appendFileSync('ping_results.txt', log);
+  res.status(200).send('Ping result received');
+});
+
+// Listen for commands from the web interface
+io.on('connection', (socket) => {
+  console.log('New client connected');
+
+  socket.on('send-command', (command) => {
+    console.log('Received command:', command);
+    currentCommand = command;  // Update the current command
+    io.emit('new-command', command);  // Broadcast to all extensions
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
